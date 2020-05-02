@@ -73,6 +73,8 @@ public class MapTypeClusterIntegrationTest extends BaseClusterIntegrationTest {
     // Create and upload segments
     File avroFile = createAvroFile();
     Schema schema = new Schema.SchemaBuilder().setSchemaName(getTableName())
+        .addSingleValueDimension(STRING_KEY_MAP_FIELD_NAME, DataType.STRING)
+        .addSingleValueDimension(INT_KEY_MAP_FIELD_NAME, DataType.STRING)
         .addMultiValueDimension(STRING_KEY_MAP_FIELD_NAME + SchemaUtils.MAP_KEY_COLUMN_SUFFIX, DataType.STRING)
         .addMultiValueDimension(STRING_KEY_MAP_FIELD_NAME + SchemaUtils.MAP_VALUE_COLUMN_SUFFIX, DataType.INT)
         .addMultiValueDimension(INT_KEY_MAP_FIELD_NAME + SchemaUtils.MAP_KEY_COLUMN_SUFFIX, DataType.INT)
@@ -118,6 +120,144 @@ public class MapTypeClusterIntegrationTest extends BaseClusterIntegrationTest {
     }
 
     return avroFile;
+  }
+
+  @Test
+  public void testJsonPathQueries()
+      throws Exception {
+    // Selection only
+    String query = "SELECT stringKeyMap FROM " + getTableName();
+    JsonNode pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    JsonNode selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 10);
+    for (int i = 0; i < 10; i++) {
+      assertEquals(selectionResults.get(i).get(0).textValue(), String.format("{\"k1\":%d,\"k2\":100%d}",i,i));
+    }
+    query = "SELECT jsonPath(stringKeyMap, '$.k1', 'INT') FROM " + getTableName();
+     pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+     selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 10);
+    for (int i = 0; i < 10; i++) {
+      assertEquals(Integer.parseInt(selectionResults.get(i).get(0).textValue()), i);
+    }
+    query = "SELECT jsonPath(intKeyMap, '$.95', 'INT') FROM " + getTableName();
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 10);
+    for (int i = 0; i < 10; i++) {
+      assertEquals(Integer.parseInt(selectionResults.get(i).get(0).textValue()), i);
+    }
+
+    // Selection order-by
+    query = "SELECT jsonPath(stringKeyMap, '$.k2', 'INT') FROM " + getTableName()
+        + " ORDER BY jsonPath(stringKeyMap, '$.k1', 'INT')";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 10);
+    for (int i = 0; i < 10; i++) {
+      assertEquals(Integer.parseInt(selectionResults.get(i).get(0).textValue()), NUM_DOCS + i);
+    }
+    query = "SELECT jsonPath(intKeyMap, '$.717', 'INT') FROM " + getTableName()
+        + " ORDER BY jsonPath(intKeyMap, '$.95', 'INT')";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 10);
+    for (int i = 0; i < 10; i++) {
+      assertEquals(Integer.parseInt(selectionResults.get(i).get(0).textValue()), NUM_DOCS + i);
+    }
+
+    // Aggregation only
+    query = "SELECT MAX(jsonPath(stringKeyMap, '$.k1', 'INT')) FROM " + getTableName();
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    JsonNode aggregationResult = pinotResponse.get("aggregationResults").get(0).get("value");
+    assertEquals((int) Double.parseDouble(aggregationResult.textValue()), NUM_DOCS - 1);
+    query = "SELECT MAX(jsonPath(intKeyMap, '$.95', 'INT')) FROM " + getTableName();
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    aggregationResult = pinotResponse.get("aggregationResults").get(0).get("value");
+    assertEquals((int) Double.parseDouble(aggregationResult.textValue()), NUM_DOCS - 1);
+
+    // Aggregation group-by
+    query = "SELECT MIN(jsonPath(stringKeyMap, '$.k2', 'INT')) FROM " + getTableName()
+        + " GROUP BY jsonPath(stringKeyMap, '$.k1', 'INT')";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    JsonNode groupByResults = pinotResponse.get("aggregationResults").get(0).get("groupByResult");
+    assertEquals(groupByResults.size(), 10);
+    for (int i = 0; i < 10; i++) {
+      JsonNode groupByResult = groupByResults.get(i);
+      assertEquals(Integer.parseInt(groupByResult.get("group").get(0).asText()), i);
+      assertEquals((int) Double.parseDouble(groupByResult.get("value").asText()), NUM_DOCS + i);
+    }
+    query = "SELECT MIN(jsonPath(intKeyMap, '$.717', 'INT')) FROM " + getTableName()
+        + " GROUP BY jsonPath(intKeyMap, '$.95', 'INT')";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    groupByResults = pinotResponse.get("aggregationResults").get(0).get("groupByResult");
+    assertEquals(groupByResults.size(), 10);
+    for (int i = 0; i < 10; i++) {
+      JsonNode groupByResult = groupByResults.get(i);
+      assertEquals(Integer.parseInt(groupByResult.get("group").get(0).asText()), i);
+      assertEquals((int) Double.parseDouble(groupByResult.get("value").asText()), NUM_DOCS + i);
+    }
+
+    // Filter
+    query = "SELECT jsonPath(stringKeyMap, '$.k2', 'INT') FROM " + getTableName()
+        + " WHERE jsonPath(stringKeyMap, '$.k1', 'INT') = 25";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 1);
+    assertEquals(Integer.parseInt(selectionResults.get(0).get(0).textValue()), NUM_DOCS + 25);
+    query = "SELECT jsonPath(intKeyMap, '$.717', 'INT') FROM " + getTableName()
+        + " WHERE jsonPath(intKeyMap, '$.95', 'INT') = 25";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 1);
+    assertEquals(Integer.parseInt(selectionResults.get(0).get(0).textValue()), NUM_DOCS + 25);
+
+    // Filter on non-existing key
+    query = "SELECT jsonPath(stringKeyMap, '$.k2', 'INT') FROM " + getTableName()
+        + " WHERE jsonPath(stringKeyMap, '$.k3', 'INT_ARRAY') = 25";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 0);
+    query = "SELECT jsonPath(intKeyMap, '$.717', 'INT') FROM " + getTableName()
+        + " WHERE jsonPath(intKeyMap, '$.123', 'INT_ARRAY') = 25";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 0);
+
+    // Select non-existing key (illegal query)
+    query = "SELECT jsonPath(stringKeyMap, '$.k3', 'INT') FROM " + getTableName();
+    pinotResponse = postQuery(query);
+    assertNotEquals(pinotResponse.get("exceptions").size(), 0);
+    query = "SELECT jsonPath(stringKeyMap, '$.123', 'INT') FROM " + getTableName();
+    pinotResponse = postQuery(query);
+    assertNotEquals(pinotResponse.get("exceptions").size(), 0);
+
+    // Select non-existing key with proper filter
+    query = "SELECT jsonPath(intKeyMap, '$.123', 'INT') FROM " + getTableName()
+        + " WHERE jsonPathKey(intKeyMap, '$.*') = \"$['123']\"";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 0);
+    query = "SELECT jsonPath(stringKeyMap, '$.k3', 'INT') FROM " + getTableName()
+        + " WHERE jsonPathKey(stringKeyMap, '$.*') = \"$['k3']\"";
+    pinotResponse = postQuery(query);
+    assertEquals(pinotResponse.get("exceptions").size(), 0);
+    selectionResults = pinotResponse.get("selectionResults").get("results");
+    assertEquals(selectionResults.size(), 0);
   }
 
   @Test

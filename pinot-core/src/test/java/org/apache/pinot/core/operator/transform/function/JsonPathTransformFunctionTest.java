@@ -20,11 +20,13 @@ package org.apache.pinot.core.operator.transform.function;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import org.apache.pinot.common.request.transform.TransformExpressionTree;
 import org.apache.pinot.core.query.exception.BadQueryRequestException;
 import org.apache.pinot.spi.data.FieldSpec;
+import org.apache.pinot.spi.utils.JsonUtils;
 import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
@@ -111,13 +113,13 @@ public class JsonPathTransformFunctionTest extends BaseTransformFunctionTest {
     for (int i = 0; i < NUM_ROWS; i++) {
       if (_stringSVValues[i].equals(_stringSVValues[0])) {
         try {
-          final List<HashMap<String, Object>> resultMap = new ObjectMapper().readValue(resultValues[i], List.class);
+          final List<HashMap<String, Object>> resultMap = JsonUtils.stringToObject(resultValues[i], List.class);
           Assert.assertEquals(_intSVValues[i], resultMap.get(0).get("intSV"));
           for (int j = 0; j < _intMVValues[i].length; j++) {
             Assert.assertEquals(_intMVValues[i][j], ((List) resultMap.get(0).get("intMV")).get(j));
           }
           Assert.assertEquals(_longSVValues[i], resultMap.get(0).get("longSV"));
-          Assert.assertEquals(new Double(_floatSVValues[i]), resultMap.get(0).get("floatSV"));
+          Assert.assertEquals(Float.compare(_floatSVValues[i], ((Double) resultMap.get(0).get("floatSV")).floatValue()), 0);
           Assert.assertEquals(_doubleSVValues[i], resultMap.get(0).get("doubleSV"));
           Assert.assertEquals(_stringSVValues[i], resultMap.get(0).get("stringSV"));
         } catch (IOException e) {
@@ -194,6 +196,25 @@ public class JsonPathTransformFunctionTest extends BaseTransformFunctionTest {
     String[] stringValues = transformFunction.transformToStringValuesSV(_projectionBlock);
     for (int i = 0; i < NUM_ROWS; i++) {
       Assert.assertEquals(stringValues[i], _stringSVValues[i]);
+    }
+  }
+
+  @Test
+  public void testJsonPathKeyTransformFunction() {
+    TransformExpressionTree expression = TransformExpressionTree.compileToExpressionTree("jsonPathKey(json,'$.*')");
+    TransformFunction transformFunction = TransformFunctionFactory.get(expression, _dataSourceMap);
+    Assert.assertTrue(transformFunction instanceof JsonPathKeyTransformFunction);
+    Assert.assertEquals(transformFunction.getName(), JsonPathKeyTransformFunction.FUNCTION_NAME);
+    String[][] keysResults = transformFunction.transformToStringValuesMV(_projectionBlock);
+    for (int i = 0; i < NUM_ROWS; i++) {
+      List<String> keys = Arrays.asList(keysResults[i]);
+      Assert.assertTrue(keys.contains(String.format("$['%s']", INT_SV_COLUMN)));
+      Assert.assertTrue(keys.contains(String.format("$['%s']", LONG_SV_COLUMN)));
+      Assert.assertTrue(keys.contains(String.format("$['%s']", FLOAT_SV_COLUMN)));
+      Assert.assertTrue(keys.contains(String.format("$['%s']", DOUBLE_SV_COLUMN)));
+      Assert.assertTrue(keys.contains(String.format("$['%s']", STRING_SV_COLUMN)));
+      Assert.assertTrue(keys.contains(String.format("$['%s']", INT_MV_COLUMN)));
+      Assert.assertTrue(keys.contains(String.format("$['%s']", TIME_COLUMN)));
     }
   }
 

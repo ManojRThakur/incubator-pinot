@@ -40,6 +40,7 @@ public enum TransformFunctionType {
 
   CAST("cast"),
   JSONPATH("jsonPath"),
+  JSONPATHKEY("jsonPathKey"),
   TIMECONVERT("timeConvert"),
   DATETIMECONVERT("dateTimeConvert"),
   DATETRUNC("dateTrunc"),
